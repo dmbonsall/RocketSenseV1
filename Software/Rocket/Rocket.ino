@@ -19,13 +19,13 @@
 //general definitions
 #define EE_ADDR       0x50
 #define LED           13
-#define NUM_COMMANDS  4
+#define NUM_COMMANDS  5
 
 MPL3115A2 myPressure;	//pressure sensor object
 
 //command array
 typedef void (*ExternalCommand)(void);
-ExternalCommand commands[NUM_COMMANDS] = {&ec_beginLog, &ec_continueLog, &ec_endLog, &ec_dumpEEPROM};
+ExternalCommand commands[NUM_COMMANDS] = {&ec_beginLog, &ec_continueLog, &ec_endLog, &ec_dumpEEPROM, &ec_reformatEEPROM};
 
 boolean isLogging = false;	//current device state
 uint16_t  currentMemoryAddress = 0;	//current write address of the eeprom
@@ -80,6 +80,11 @@ void loop()
 
 		//write temperature
 		Wire.write(temperatureBytes, 4);
+		
+		Wire.write(0xF0);
+		Wire.write(0xF0);
+		Wire.write(0xF0);
+		Wire.write(0xF0);
 
 		Wire.endTransmission();			//end transmission with the eeprom
 		currentMemoryAddress += 16;		//12 bytes transferred, plus four "imaginary" to make page writes work out....
@@ -139,3 +144,50 @@ void ec_dumpEEPROM()
 	}
 	Serial.println("End of data transmission");
 }
+
+//writes all bytes of the eeprom to 0xFF to "erase" or reformat eeprom
+//writes in groups of 16; 32 or 64 byte groups were not functioning correctly, possibly due to Wire buffer behaviour
+void ec_reformatEEPROM()
+{	
+	Serial.println("Reformat EEPROM (all data will be erased)?");	//confirm that the user wants to erase data
+	while (!(Serial.available()));									//wait until we get a response back from computer
+	char val = (char)Serial.read();									//get the answer
+	
+	if (!(val == 'y' || val == 'Y'))	//if the answer is not yes, cancel
+	{
+		Serial.println("Reformat cancelled");
+		return;
+	}
+
+	//reformat
+	for (uint16_t curAddr = 0; curAddr < uint16_t(0x8000); curAddr += 16)	//write all the bytes in groups of 16
+	{
+		//send debug info
+		if (curAddr%64 == 0)	//if we are at the beginning of a page, print debug info
+		{
+			Serial.print("Writing page");
+			Serial.print(curAddr/64 + 1);
+			Serial.println(" of 512...\t");
+		}
+		
+		Wire.beginTransmission(EE_ADDR);	//start the transmission
+		Wire.write((uint8_t)(curAddr>>8));	//send the msb
+		Wire.write((uint8_t)curAddr);		//send the lsb
+		
+		for (uint8_t i = 0; i < 16; i ++)	//write 16 bytes to 0xFF
+		{
+			Wire.write(0xFF);
+		}
+		
+		Wire.endTransmission();			//end the transmission
+		//Wire.flush();
+		
+		delay(5);						//give time for the page to write
+	}
+	Serial.println("Finished reformat");
+	
+}
+
+
+
+
