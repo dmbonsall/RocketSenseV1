@@ -17,18 +17,21 @@
 #include <stdio.h>
 
 //general definitions
-#define EE_ADDR       0x50
-#define LED           13
-#define NUM_COMMANDS  5
+#define EE_ADDR			0x50
+#define LED				13
+#define NUM_COMMANDS	7
+#define DEVICE_INFO		"RocketSenseV1"
 
 MPL3115A2 myPressure;	//pressure sensor object
 
 //command array
 typedef void (*ExternalCommand)(void);
-ExternalCommand commands[NUM_COMMANDS] = {&ec_beginLog, &ec_continueLog, &ec_endLog, &ec_dumpEEPROM, &ec_reformatEEPROM};
+ExternalCommand commands[NUM_COMMANDS] = {&ec_beginLog, &ec_continueLog, &ec_endLog, &ec_dumpEEPROM, &ec_reformatEEPROM, &ec_dumpRaw, &ec_getDeviceInfo};
 
 boolean isLogging = false;	//current device state
 uint16_t  currentMemoryAddress = 0;	//current write address of the eeprom
+byte rawDumpPreamble[3] = {0x01, 0x02, 0x03};
+byte rawDumpEOT[3] = {0x03, 0x02, 0x01};
 
 void setup()
 {
@@ -186,6 +189,36 @@ void ec_reformatEEPROM()
 	}
 	Serial.println("Finished reformat");
 	
+}
+
+void ec_dumpRaw()
+{
+	Serial.write(rawDumpPreamble, 3);
+	Wire.beginTransmission(EE_ADDR);	//start the transmission
+	Wire.write(0x00);					//msb of start address
+	Wire.write(0x00);					//lsb of start address
+	Wire.endTransmission();				//end transmission
+
+	for (uint16_t j = 0; j < 4096; j++)	//read the entire chip (0x8000 bytes total / 8 bytes per read = 4096)
+	{
+		Wire.requestFrom(EE_ADDR, 8);	//get 8 bytes from the eeprom
+
+		for (uint8_t i = 0; i < 8; i++)	//get each individual byte
+		{
+			if (!(Wire.available())) break;	//if nothing was read from the chip, don't print anything
+			uint8_t data = Wire.read();		//get byte from the buffer
+
+			//print the data value
+			Serial.write(data);
+		}
+		delay(1);			//wait to avoid overloading the eeprom when reading, (probably unnecessary)
+	}
+	Serial.write(rawDumpEOT, 3);
+}
+
+void ec_getDeviceInfo()
+{
+	Serial.println(DEVICE_INFO);
 }
 
 
