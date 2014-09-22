@@ -30,12 +30,17 @@ namespace RocketDataDownload
         const int deviceDownloadCommand = 5;
         const int deviceReformatCommand = 4;
 
-        delegate void downLoadDelegate();
+        private delegate void DownloadProgressBarDelegate(int numIncrement);
+        private delegate void DownloadStatusLabelDelegate(string text);
+        private DownloadProgressBarDelegate downloadProgBarDel;
+        private DownloadStatusLabelDelegate downloadLabelDel;
 
         public MainWindow()
         {
             InitializeComponent();
             serialPort = new SerialPort();  //initialize the serial port object
+            downloadProgBarDel += incrementDownloadProgressBar;
+            downloadLabelDel += setDownloadLabelText;
         }
 
         private int loadPorts()
@@ -95,7 +100,8 @@ namespace RocketDataDownload
                 {
                     try
                     {
-                        //downloadStatusLabel.Text = "Starting Download";
+                        this.Dispatcher.BeginInvoke(downloadLabelDel, "Starting Download");
+
                         serialPort.DiscardInBuffer();   //clear the input buffer
                         byte[] sendBuffer = { deviceDownloadCommand };
                         serialPort.Write(sendBuffer, 0, sendBuffer.Count());    //send the downloadCommand
@@ -104,13 +110,13 @@ namespace RocketDataDownload
 
                         if (!(preamblePacket[0] == 0x01 && preamblePacket[1] == 0x02 && preamblePacket[2] == 0x03)) //if the preamble packet is not as expected
                         {
-                            //downloadStatusLabel.Text = "Download Failed";
+                            this.Dispatcher.BeginInvoke(downloadLabelDel, "Download Failed");
                             return;
                         }
                         //if packet is as expected, continue
 
-                       // downloadStatusLabel.Text = "Downloading Data...";
-                        //downloadProgressBar.Value = 0;
+                        this.Dispatcher.BeginInvoke(downloadLabelDel, "Downloading Data...");
+                        this.Dispatcher.BeginInvoke(new Action(() => resetDownloadProgressBar()), null);
                         while (true)    //intentional
                         {
                             byte data = (byte)serialPort.ReadByte();    //get the first byte
@@ -131,7 +137,7 @@ namespace RocketDataDownload
                                         writer.Write(data);
                                         writer.Write(dataTwo);
                                         writer.Write(dataThree);
-                                        //downloadProgressBar.Value += 3;
+                                        this.Dispatcher.BeginInvoke(downloadProgBarDel, 3);
                                         continue;
                                     }
                                 }
@@ -139,30 +145,45 @@ namespace RocketDataDownload
                                 {
                                     writer.Write(data);
                                     writer.Write(dataTwo);
-                                    //downloadProgressBar.Value += 2;
+                                    this.Dispatcher.BeginInvoke(downloadProgBarDel, 2);
                                     continue;
                                 }
                             }
 
                             writer.Write(data); //if normal data
-                            this.Dispatcher.Invoke(new downLoadDelegate(() => downloadProgressBar.Value++), null);
+                            this.Dispatcher.BeginInvoke(downloadProgBarDel, 1);
                         }
 
-                        //downloadStatusLabel.Text = "Download Complete";
+                        this.Dispatcher.BeginInvoke(downloadLabelDel, "Download Complete");
                     }
                     catch (Exception ex)
                     {
                         MessageBox.Show(ex.ToString());
-                        //downloadStatusLabel.Text = "Download Falied";
+                        this.Dispatcher.BeginInvoke(downloadLabelDel, "Download Failed");
                     }
                 }
 
-                //if (reformatCheckBox.IsChecked == true)
-                //{
-                 //   reformatDeviceMemory();
-                //}
+                if (reformatCheckBox.IsChecked == true)
+                {
+                    this.Dispatcher.Invoke(new Action(() => reformatDeviceMemory()));
+                }
             }
 
+        }
+
+        private void incrementDownloadProgressBar(int numIncrement)
+        {
+            downloadProgressBar.Value += numIncrement;
+        }
+
+        private void setDownloadLabelText(string text)
+        {
+            downloadStatusLabel.Text = text;
+        }
+
+        private void resetDownloadProgressBar()
+        {
+            this.downloadProgressBar.Value = 0;
         }
 
         private void Window_Loaded(object sender, RoutedEventArgs e)
