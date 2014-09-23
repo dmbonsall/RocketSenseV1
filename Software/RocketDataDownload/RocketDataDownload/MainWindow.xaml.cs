@@ -29,6 +29,7 @@ namespace RocketDataDownload
         const int deviceGetInfoCommand = 6;
         const int deviceDownloadCommand = 5;
         const int deviceReformatCommand = 4;
+        const char deviceReformatConfirm = 'y';
 
         private delegate void DownloadProgressBarDelegate(int numIncrement);
         private delegate void DownloadStatusLabelDelegate(string text);
@@ -90,13 +91,69 @@ namespace RocketDataDownload
         }
         private void reformatDeviceMemory()
         {
+            if (serialPort.IsOpen)
+            {
+                try
+                {
+                    this.Dispatcher.BeginInvoke(new Action(() => resetReformatProgressBar()));  //reset the progress bar
+                    byte[] sendBuffer = { (byte)deviceReformatCommand };
+                    serialPort.Write(sendBuffer, 0, 1); //send the reformat command
+                    string line = (serialPort.ReadLine()).Trim();   //get the next line of text
 
+                    if (!(line.Equals("Reformat EEPROM (all data will be erased)?")))
+                    {
+                        this.Dispatcher.BeginInvoke(new Action(() => setReformatLabelText("Reformat Failed")));
+                        return;
+                    }
+
+                    //if the line was as expected
+                    this.Dispatcher.BeginInvoke(new Action(() => setReformatLabelText("Reformatting...")));
+                    sendBuffer[0] = (byte)deviceReformatConfirm;
+                    serialPort.Write(sendBuffer, 0, 1); //send the confirm character
+
+                    int numPagesWriten = 0;
+                    while (true)    //intentional
+                    {
+                        line = serialPort.ReadLine().Trim();
+                        if (line.Substring(0, 12).Equals("Writing page") && numPagesWriten < 512)
+                        {
+                            this.Dispatcher.BeginInvoke(new Action(() => incrementReformatProgressBar()));
+                            numPagesWriten++;
+                        }
+                        else if (line.Equals("Finished reformat"))
+                        {
+                            if (numPagesWriten != 512)
+                            {
+                                this.Dispatcher.BeginInvoke(new Action(() => setReformatLabelText("Reformat Failed")));
+                                return;
+                            }
+                            break;
+                        }
+                        else   //if there is an unrecognizeable line
+                        {
+                            this.Dispatcher.BeginInvoke(new Action(() => setReformatLabelText("Reformat Failed")));
+                            return;
+                        }
+                    }
+
+                    this.Dispatcher.BeginInvoke(new Action(() => setReformatLabelText("Reformat Complete")));
+
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(ex.ToString());
+                }
+            }
         }
-        private void downloadData(object filePath)
+        private void downloadData(object parameterObj)
         {
+            //allows parameters to be passed to the method
+            parameterPasser p = (parameterPasser)parameterObj;
+            string filePath = (string)p.parameters[0];
+            bool reformat = (bool)p.parameters[1];
             if (serialPort.IsOpen)  //if the port is open
             {
-                using(BinaryWriter writer = new BinaryWriter(new FileStream((string)filePath, FileMode.Create)))
+                using(BinaryWriter writer = new BinaryWriter(new FileStream(filePath, FileMode.Create)))
                 {
                     try
                     {
@@ -163,9 +220,9 @@ namespace RocketDataDownload
                     }
                 }
 
-                if (reformatCheckBox.IsChecked == true)
+                if (reformat)
                 {
-                    this.Dispatcher.Invoke(new Action(() => reformatDeviceMemory()));
+                    this.Dispatcher.BeginInvoke(new Action(() => reformatButton_Click(null, null)));
                 }
             }
 
@@ -175,15 +232,26 @@ namespace RocketDataDownload
         {
             downloadProgressBar.Value += numIncrement;
         }
-
         private void setDownloadLabelText(string text)
         {
             downloadStatusLabel.Text = text;
         }
-
         private void resetDownloadProgressBar()
         {
             this.downloadProgressBar.Value = 0;
+        }
+
+        private void incrementReformatProgressBar()
+        {
+            reformatProgressBar.Value++;
+        }
+        private void resetReformatProgressBar()
+        {
+            reformatProgressBar.Value = 0;
+        }
+        private void setReformatLabelText(string text)
+        {
+            reformatStatusLabel.Text = text;
         }
 
         private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -214,10 +282,8 @@ namespace RocketDataDownload
 
         private void reformatButton_Click(object sender, RoutedEventArgs e)
         {
-            if (serialPort.IsOpen)  //only excecute if the port is open
-            {
-                reformatDeviceMemory();
-            }
+            Thread th = new Thread(new ThreadStart(reformatDeviceMemory));
+            th.Start();
         }
 
         private void portComboBox_DropDownOpened(object sender, EventArgs e)
@@ -260,10 +326,18 @@ namespace RocketDataDownload
         private void downloadButton_Click(object sender, RoutedEventArgs e)
         {
             Thread thread = new Thread(new ParameterizedThreadStart(downloadData));
-            string test = String.Copy(filePathBox.Text);
-            thread.Start(test);
+            object[] parameters = {String.Copy(filePathBox.Text), reformatCheckBox.IsChecked};
+            thread.Start(new parameterPasser(parameters));
         }
 
-
+        //structure to allow parameters to be passed to the downloadData method
+        private struct parameterPasser
+        {
+            public object[] parameters;
+            public parameterPasser(object[] p)
+            {
+                parameters = p;
+            }
+        }
     }
 }

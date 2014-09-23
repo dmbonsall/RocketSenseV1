@@ -9,15 +9,15 @@
                 <Button Name="openButton" Width="50" Height="30" Margin="432,6,6,96" Content="Open" Click="openButton_Click" />
                 <Button Name="downloadButton" Height="30" Content="Download Data" Margin="190,45,190,0" VerticalAlignment="Top" Click="downloadButton_Click" />
                 <CheckBox Name="reformatCheckBox" Content="Reformat After Download" Margin="10,50,320,0" Height="20" VerticalAlignment="Top" />
-                <ProgressBar Name="downloadProgressBar" Height="20" Margin="10,100,100,0" VerticalAlignment="Top" Minimum="0" Maximum="32768"/>
-                <TextBlock Name="downloadStatusLabel" Text="Ready" Height="25" Margin="0,95,10,0" Width="85" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                <ProgressBar Name="downloadProgressBar" Height="20" Margin="10,100,150,0" VerticalAlignment="Top" Minimum="0" Maximum="32768"/>
+                <TextBlock Name="downloadStatusLabel" Text="Ready" Height="25" Margin="346,105,0,0" VerticalAlignment="Top" HorizontalAlignment="Left"  />
             </Grid>
         </GroupBox>
         <GroupBox Header="Reformat" Height="120" HorizontalAlignment="Left" Margin="10,160,0,0" Name="groupBox2" VerticalAlignment="Top" Width="500">
             <Grid>
                 <Button Name="reformatButton" Content="Reformat" Height="30" Margin="100,10,100,0" VerticalAlignment="Top" Click="reformatButton_Click" />
-                <ProgressBar Name="reformatProgrssBar" Height="25" Margin="10,65,100,0" VerticalAlignment="Top"/>
-                <TextBlock Name="reformatStatusLabel" Height="25" Text="Ready" Width="85" Margin="0,70,10,0" HorizontalAlignment="Right" VerticalAlignment="Top"/>
+                <ProgressBar Name="reformatProgressBar" Height="20" Margin="10,65,150,0" VerticalAlignment="Top" Minimum="0" Maximum="512"/>
+                <TextBlock Name="reformatStatusLabel" Height="25" Text="Ready"  Margin="346,70,0,0" VerticalAlignment="Top" HorizontalAlignment="Left"  />
             </Grid>
         </GroupBox>
         <ComboBox Name="portComboBox" Height="25" Width="100" VerticalAlignment="Bottom" HorizontalAlignment="Left" Margin="10,0,0,10" DropDownOpened="portComboBox_DropDownOpened"/>
