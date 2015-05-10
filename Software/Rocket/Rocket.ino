@@ -19,14 +19,16 @@
 //general definitions
 #define EE_ADDR			0x50
 #define LED				13
-#define NUM_COMMANDS	7
+#define NUM_COMMANDS	8
 #define DEVICE_INFO		"RocketSenseV1"
+#define COUNTDOWN_SEC	120
 
 MPL3115A2 myPressure;	//pressure sensor object
 
 //command array
 typedef void (*ExternalCommand)(void);
-ExternalCommand commands[NUM_COMMANDS] = {&ec_beginLog, &ec_continueLog, &ec_endLog, &ec_dumpEEPROM, &ec_reformatEEPROM, &ec_dumpRaw, &ec_getDeviceInfo};
+ExternalCommand commands[NUM_COMMANDS] = {&ec_beginLog, &ec_continueLog, &ec_endLog, &ec_dumpEEPROM, &ec_reformatEEPROM,
+					  &ec_dumpRaw, &ec_getDeviceInfo, &ec_logWithDelay};
 
 boolean isLogging = false;	//current device state
 uint16_t  currentMemoryAddress = 0;	//current write address of the eeprom
@@ -221,6 +223,22 @@ void ec_getDeviceInfo()
 	Serial.println(DEVICE_INFO);
 }
 
+void ec_logWithDelay()
+{
+	Serial.println("Beginning Countdown...");
+	for (uint8_t i = COUNTDOWN_SEC; i >=0; i++)
+	{
+		Serial.println(i + "...");
+		delay(1000);
+		if (Serial.available())	//see if there is any command
+		{
+			uint8_t cmd = (uint8_t)Serial.read();	//read the command
+			if (cmd == 2)	//if the command is the end log command, end the countdown and return
+				return;
+		}
+	}
+	ec_beginLog();
+}
 
 
 
