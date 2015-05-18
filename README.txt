@@ -1,0 +1,1 @@
+This is the first iteration of the readme.... obviously needs some work
