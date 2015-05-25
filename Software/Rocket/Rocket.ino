@@ -13,7 +13,6 @@
 //turn the I2C frequency up to 400kHz (fast mode)
 //#define TWI_FREQ  400000L
 
-//#include <Wire.h>
 extern "C"
 {
     #include <MyTWI.h>
@@ -57,7 +56,7 @@ void loop()
 {
 	proccessCommand();
         
-        if (isLogging)    //if we are currently logging (new)
+        if (isLogging)    //if we are currently logging
         {
             if (currentBufferPos == 0)    //if the buffer needs the write address added to it
             {
@@ -82,25 +81,15 @@ void loop()
             if ((currentBufferPos-2) % 64 == 0)    //when it is time to write to the eeprom
             {
                 //write to memory
-		/*Wire.beginTransmission(EE_ADDR);				//start transmission with the eeprom
-		Wire.write((uint8_t)(currentMemoryAddress>>8));                 //msb of address
-		Wire.write((uint8_t)currentMemoryAddress); 		        //lsb of address
-                Wire.write(eepromWriteBuffer, 16);
-                *eepromWriteBuffer += 16;
-                Wire.write(eepromWriteBuffer, 16);
-                *eepromWriteBuffer += 16;
-                Wire.write(eepromWriteBuffer, 16);
-                *eepromWriteBuffer += 16;
-                Wire.write(eepromWriteBuffer, 16);
-                Wire.endTransmission();*/                                         //end the transmission
-                
-                eepromWrite(eepromWriteBuffer, 66);    //write all of the data
+                eepromWrite(eepromWriteBuffer, 66);    //write all of the data to eeprom
                 
                 currentMemoryAddress += 64;    //increment the current eeprom memory address
                 currentBufferPos = 0;    //reset the buffer index
-                for (uint8_t i = 0; i < 64; i++)
+                
+                //testing purposes only
+                /*for (uint8_t i = 0; i < 64; i++)
                     Serial.println(eepromWriteBuffer[i], HEX);
-                isLogging = 0;
+                isLogging = 0;*/
             }
             delay(1);
             Serial.print("Logged at ");
@@ -140,10 +129,6 @@ void ec_endLog()
 void ec_dumpEEPROM()
 {
 	Serial.println("Beginning of data transmission");
-	/*Wire.beginTransmission(EE_ADDR);	//start the transmission
-	Wire.write(0x00);					//msb of start address
-	Wire.write(0x00);					//lsb of start address
-	Wire.endTransmission();*/				//end transmission
 
         uint8_t addrBuffer[2] = {0,0};    //starting address {msb, lsb}
         eepromWrite(addrBuffer, 2);        //write the address to the eeprom
@@ -152,7 +137,6 @@ void ec_dumpEEPROM()
 	uint16_t byteNum = 0;				//keep track of memory address for table output
 	for (uint16_t j = 0; j < 4096; j++)	//read the entire chip (0x8000 bytes total / 8 bytes per read = 4096)
 	{
-		//Wire.requestFrom(EE_ADDR, 8);	//get 8 bytes from the eeprom
                 eepromRead(rxBuffer, 8);
 
 		//print the memory address for the row
@@ -160,24 +144,18 @@ void ec_dumpEEPROM()
 		Serial.print(":\t");
 
 		for (uint8_t i = 0; i < 8; i++)	//get each individual byte
-		{
-			//if (!(Wire.available())) break;	//if nothing was read from the chip, don't print anything
-			//uint8_t data = Wire.read();		//get byte from the buffer
-                        
+		{       
 			//print the data value
-			//Serial.print(data, HEX);
                         Serial.print(rxBuffer[i], HEX);
 			Serial.print(" ");
 		}
 		Serial.println();	//go to the next line
 		byteNum += 8;		//increment byte counter
-		delay(1);			//wait to avoid overloading the eeprom when reading, (probably unnecessary)
 	}
 	Serial.println("End of data transmission");
 }
 
 //writes all bytes of the eeprom to 0xFF to "erase" or reformat eeprom
-//writes in groups of 16; 32 or 64 byte groups were not functioning correctly, possibly due to Wire buffer behaviour
 void ec_reformatEEPROM()
 {	
 	Serial.println("Reformat EEPROM (all data will be erased)?");	//confirm that the user wants to erase data
@@ -201,19 +179,6 @@ void ec_reformatEEPROM()
 			Serial.println(" of 512...\t");
 		}
 		
-		/*Wire.beginTransmission(EE_ADDR);	//start the transmission
-		Wire.write((uint8_t)(curAddr>>8));	//send the msb
-		Wire.write((uint8_t)curAddr);		//send the lsb
-		
-		for (uint8_t i = 0; i < 64; i ++)	//write 16 bytes to 0xFF
-		{
-			Wire.write(0xFF);
-		}
-		
-		Wire.endTransmission();			//end the transmission
-		//Wire.flush();
-		
-		delay(5);*/						//give time for the page to write
                 currentBufferPos = 0;
                 eepromWriteBuffer[currentBufferPos++] = (uint8_t)(curAddr>>8);    //msb
                 eepromWriteBuffer[currentBufferPos++] = (uint8_t)(curAddr);        //lsb
@@ -222,6 +187,7 @@ void ec_reformatEEPROM()
                     eepromWriteBuffer[currentBufferPos] = 0xFF;
                 }
                 eepromWrite(eepromWriteBuffer, 66);    //write the reformatted page to the eeprom
+                delay(5);    //allow for page write
                 
 	}
 	Serial.println("Finished reformat");
@@ -231,10 +197,6 @@ void ec_reformatEEPROM()
 void ec_dumpRaw()
 {
 	Serial.write(rawDumpPreamble, 3);
-	/*Wire.beginTransmission(EE_ADDR);	//start the transmission
-	Wire.write(0x00);					//msb of start address
-	Wire.write(0x00);					//lsb of start address
-	Wire.endTransmission();*/				//end transmission
 
         uint8_t addrBuffer[2] = {0,0};    //starting address {msb, lsb}
         eepromWrite(addrBuffer, 2);        //write the address to the eeprom
@@ -247,14 +209,9 @@ void ec_dumpRaw()
                 eepromRead(rxBuffer, 8);
 		for (uint8_t i = 0; i < 8; i++)	//get each individual byte
 		{
-			//if (!(Wire.available())) break;	//if nothing was read from the chip, don't print anything
-			//uint8_t data = Wire.read();		//get byte from the buffer
-
 			//print the data value
-			//Serial.write(data);
                         Serial.write(rxBuffer[i]);
 		}
-		delay(1);			//wait to avoid overloading the eeprom when reading, (probably unnecessary)
 	}
 	Serial.write(rawDumpEOT, 3);
 }
