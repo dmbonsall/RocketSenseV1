@@ -1,0 +1,46 @@
+/*	if(isLogging)	//if we are currently logging (old)
+	{
+		uint16_t time = (uint16_t)millis();				//get the time and cast from unsigned long to u int to save memory space
+		//float altitude = myPressure.readAltitude();		//get the altitude
+		//float temperature = myPressure.readTemp();		//get the temperature
+
+		//convert the floats to byte arrays
+		//uint8_t altitudeBytes[4];					//create destination array for altitude
+		//memcpy(altitudeBytes, &altitude, 4);		//copy
+		//uint8_t temperatureBytes[4];				//create destination array for altitude
+		//memcpy(temperatureBytes, &temperature, 4);	//copy
+
+		//write to memory
+		Wire.beginTransmission(EE_ADDR);				//start transmission with the eeprom
+		Wire.write((uint8_t)(currentMemoryAddress>>8));	//msb of address
+		Wire.write((uint8_t)currentMemoryAddress); 		//lsb of address
+
+		//write time
+		//Wire.write((uint8_t)(time>>24));	//write msb to the eeprom
+		//Wire.write((uint8_t)(time>>16));	//write most significant center byte
+		Wire.write((uint8_t)(time>>8));		//write least significant center byte
+		Wire.write((uint8_t)time);			//write lsb
+
+		//write altitude
+		//Wire.write(altitudeBytes, 4);
+
+		//write temperature
+		//Wire.write(temperatureBytes, 4);
+		
+		Wire.write(0xF0);
+		Wire.write(0xF0);
+		Wire.write(0xF0);
+		Wire.write(0xF0);
+                Wire.write(0xF0);
+		Wire.write(0xF0);
+
+		Wire.endTransmission();			//end transmission with the eeprom
+		currentMemoryAddress += 8;		//2 bytes transferred, plus 6 "imaginary" to make page writes work out....
+
+		//Serial debug information
+                Serial.print("mem addr:");
+                Serial.print(currentMemoryAddress, HEX);
+		Serial.print("Logged at ");
+		Serial.println(millis(), HEX);
+	}
+        delay(10);*/

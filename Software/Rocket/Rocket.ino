@@ -10,16 +10,19 @@
  * v1.0
 **/
 
+//turn the I2C frequency up to 400kHz (fast mode)
+#define TWI_FREQ  400000L
 
 #include <Wire.h>
 #include "MPL3115A2.h"
 #include <stdint.h>
 #include <stdio.h>
 
+
 //general definitions
 #define EE_ADDR			0x50
 #define LED				13
-#define NUM_COMMANDS	8
+#define NUM_COMMANDS	10
 #define DEVICE_INFO		"RocketSenseV1"
 #define COUNTDOWN_SEC	120
 
@@ -28,12 +31,16 @@ MPL3115A2 myPressure;	//pressure sensor object
 //command array
 typedef void (*ExternalCommand)(void);
 ExternalCommand commands[NUM_COMMANDS] = {&ec_beginLog, &ec_continueLog, &ec_endLog, &ec_dumpEEPROM, &ec_reformatEEPROM,
-					  &ec_dumpRaw, &ec_getDeviceInfo, &ec_logWithDelay};
+					  &ec_dumpRaw, &ec_dumpFormatted, &ec_getDeviceInfo, &ec_logWithDelay, &ec_displayHelp};
 
 boolean isLogging = false;	//current device state
 uint16_t  currentMemoryAddress = 0;	//current write address of the eeprom
 byte rawDumpPreamble[3] = {0x01, 0x02, 0x03};
 byte rawDumpEOT[3] = {0x03, 0x02, 0x01};
+
+uint8_t eepromWriteBuffer[64];
+uint8_t currentBufferPos = 0;
+uint8_t lastWriteTime = 0;
 
 void setup()
 {
@@ -43,31 +50,78 @@ void setup()
 	myPressure.begin();		//init pressure sensor
 
 	//sensor config
-	myPressure.setModeAltimeter();		//set to output altitude
+	/*myPressure.setModeAltimeter();		//set to output altitude
 	myPressure.setOversampleRate(7);	//recommended value of 128; see example
-	myPressure.enableEventFlags();		//required; see example
+	myPressure.enableEventFlags();*/		//required; see example
+        
+        Serial.println("Device Reset...");
+        Serial.print(DEVICE_INFO);
+        Serial.println(" send 'h' for help");
 }
 
 void loop()
 {
-	if (Serial.available())	//check to see if there are any commands in the input stream
+	proccessCommand();
+        
+        if (isLogging)    //if we are currently logging (new)
+        {
+            uint16_t time = (uint16_t)millis();    //get the time and cast it to 2 bytes
+            
+            //write the 2 byte time
+            eepromWriteBuffer[currentBufferPos++] = (uint8_t)(time>>8);
+            eepromWriteBuffer[currentBufferPos++] = (uint8_t)(time);
+            
+            //write 6 placeholder bytes
+            eepromWriteBuffer[currentBufferPos++] = 0xF0;
+            eepromWriteBuffer[currentBufferPos++] = 0xF0;
+            eepromWriteBuffer[currentBufferPos++] = 0xF0;
+            eepromWriteBuffer[currentBufferPos++] = 0xF0;
+            eepromWriteBuffer[currentBufferPos++] = 0xF0;
+            eepromWriteBuffer[currentBufferPos++] = 0xF0;
+            
+            if (currentBufferPos % 64 == 0)    //when it is time to write to the eeprom
+            {
+                //uint8_t currentWriteTime = (uint8_t)time;
+                //Serial.println("enter");
+                //while(currentWriteTime - lastWriteTime< 6);    //wait until at least 6ms have passed to ensure that the eeprom has writen the last page successfully
+                //Serial.println("exit");
+                //write to memory
+		Wire.beginTransmission(EE_ADDR);				//start transmission with the eeprom
+		Wire.write((uint8_t)(currentMemoryAddress>>8));                 //msb of address
+		Wire.write((uint8_t)currentMemoryAddress); 		        //lsb of address
+                //Serial.println(Wire.write(eepromWriteBuffer, 64));              //write the contents of the entire buffer
+                Wire.write(eepromWriteBuffer, 16);
+                *eepromWriteBuffer += 16;
+                Wire.write(eepromWriteBuffer, 16);
+                *eepromWriteBuffer += 16;
+                Wire.write(eepromWriteBuffer, 16);
+                *eepromWriteBuffer += 16;
+                Wire.write(eepromWriteBuffer, 16);
+                Wire.endTransmission();                                         //end the transmission
+                currentMemoryAddress += 64;    //increment the current eeprom memory address
+                currentBufferPos = 0;    //reset the buffer index
+                //lastWriteTime = currentWriteTime;    //set the last write time to this write time
+                //delay(5);
+                for (uint8_t i = 0; i < 64; i++)
+                    Serial.println(eepromWriteBuffer[i], HEX);
+                isLogging = 0;
+            }
+            delay(1);
+            Serial.print("Logged at ");
+            Serial.println(millis(), HEX);
+        }
+        
+/*	if(isLogging)	//if we are currently logging (old)
 	{
-		uint8_t cmd = (uint8_t)Serial.read();	//read the command
-		if(!(cmd >= NUM_COMMANDS))				//make sure the command is within the range
-			(commands[cmd])();					//execute the command at the specified index
-	}
-
-	if(isLogging)	//if we are currently logging
-	{
-		uint32_t time = (uint32_t)millis();				//get the time and cast from unsigned long to u int to save memory space
-		float altitude = myPressure.readAltitude();		//get the altitude
-		float temperature = myPressure.readTemp();		//get the temperature
+		uint16_t time = (uint16_t)millis();				//get the time and cast from unsigned long to u int to save memory space
+		//float altitude = myPressure.readAltitude();		//get the altitude
+		//float temperature = myPressure.readTemp();		//get the temperature
 
 		//convert the floats to byte arrays
-		uint8_t altitudeBytes[4];					//create destination array for altitude
-		memcpy(altitudeBytes, &altitude, 4);		//copy
-		uint8_t temperatureBytes[4];				//create destination array for altitude
-		memcpy(temperatureBytes, &temperature, 4);	//copy
+		//uint8_t altitudeBytes[4];					//create destination array for altitude
+		//memcpy(altitudeBytes, &altitude, 4);		//copy
+		//uint8_t temperatureBytes[4];				//create destination array for altitude
+		//memcpy(temperatureBytes, &temperature, 4);	//copy
 
 		//write to memory
 		Wire.beginTransmission(EE_ADDR);				//start transmission with the eeprom
@@ -75,41 +129,48 @@ void loop()
 		Wire.write((uint8_t)currentMemoryAddress); 		//lsb of address
 
 		//write time
-		Wire.write((uint8_t)(time>>24));	//write msb to the eeprom
-		Wire.write((uint8_t)(time>>16));	//write most significant center byte
+		//Wire.write((uint8_t)(time>>24));	//write msb to the eeprom
+		//Wire.write((uint8_t)(time>>16));	//write most significant center byte
 		Wire.write((uint8_t)(time>>8));		//write least significant center byte
 		Wire.write((uint8_t)time);			//write lsb
 
 		//write altitude
-		Wire.write(altitudeBytes, 4);
+		//Wire.write(altitudeBytes, 4);
 
 		//write temperature
-		Wire.write(temperatureBytes, 4);
+		//Wire.write(temperatureBytes, 4);
 		
 		Wire.write(0xF0);
 		Wire.write(0xF0);
 		Wire.write(0xF0);
 		Wire.write(0xF0);
+                Wire.write(0xF0);
+		Wire.write(0xF0);
 
 		Wire.endTransmission();			//end transmission with the eeprom
-		currentMemoryAddress += 16;		//12 bytes transferred, plus four "imaginary" to make page writes work out....
+		currentMemoryAddress += 8;		//2 bytes transferred, plus 6 "imaginary" to make page writes work out....
 
 		//Serial debug information
+                Serial.print("mem addr:");
+                Serial.print(currentMemoryAddress, HEX);
 		Serial.print("Logged at ");
-		Serial.println(millis(), DEC);
+		Serial.println(millis(), HEX);
 	}
-
+        delay(10);*/
 }
 
 void ec_beginLog()
 {
 	currentMemoryAddress = 0;	//reset memory address
+        currentBufferPos = 0;           //reset the buffer position
+        lastWriteTime = (uint8_t)millis();    //reset the last write time to the current time
 	isLogging = true;			//start logging
 }
 
 void ec_continueLog()
 {
 	isLogging = true;	//start logging
+        lastWriteTime = (uint8_t)millis();    //reset the last write time to the current time
 }
 
 void ec_endLog()
@@ -233,11 +294,99 @@ void ec_logWithDelay()
 		if (Serial.available())	//see if there is any command
 		{
 			uint8_t cmd = (uint8_t)Serial.read();	//read the command
-			if (cmd == 2)	//if the command is the end log command, end the countdown and return
+			if (cmd == 2 || cmd == 'e')	//if the command is the end log command, end the countdown and return
 				return;
 		}
 	}
 	ec_beginLog();
+}
+
+void ec_dumpFormatted()
+{
+    for (uint16_t j = 0; j < 4096; j++)	//read the entire chip (0x8000 bytes total / 8 bytes per read = 4096)
+	{
+		Wire.requestFrom(EE_ADDR, 8);	//get 8 bytes from the eeprom
+                if (!Wire.available()) break;    //in case no data was recieved
+                uint16_t time = (((uint8_t)Wire.read())<<8) | ((uint8_t)Wire.read());
+                Serial.print(time, DEC);
+                Serial.print(",");
+                Serial.print((uint8_t)(Wire.read()), DEC);
+                Serial.print(",");
+                Serial.print((uint8_t)(Wire.read()), DEC);
+                Serial.print(",");
+                Serial.print((uint8_t)(Wire.read()), DEC);
+                Serial.print(",");
+                Serial.print((uint8_t)(Wire.read()), DEC);
+                Serial.print(",");
+                Serial.print((uint8_t)(Wire.read()), DEC);
+                Serial.print(",");
+                Serial.print((uint8_t)(Wire.read()), DEC);
+                Serial.print(",");
+                Serial.print((uint8_t)(Wire.read()), DEC);
+                Serial.println();
+	}
+}
+
+void ec_displayHelp()
+{
+    Serial.println(DEVICE_INFO);
+    Serial.println("Valid Commands");
+    Serial.println("h = display help");
+    Serial.println("i = get device info");
+    Serial.println("b = begin log");
+    Serial.println("c = continue log");
+    Serial.println("e = end log");
+    Serial.println("t = log with delay");
+    Serial.println("d = dump eeprom data");
+    Serial.println("w = dump eeprom data as raw bytes");
+    Serial.println("f = dump eeprom with comma seperated data");
+    Serial.println("r = reformat/erase eeprom data");
+}
+
+void proccessCommand()
+{
+    if (Serial.available())
+    {
+        uint8_t cmd = Serial.read();
+        switch (cmd)
+        {
+            case (uint8_t)'b':
+                ec_beginLog();
+                break;
+            case (uint8_t)'c':
+                ec_continueLog();
+                break;
+            case (uint8_t)'e':
+                ec_endLog();
+                break;
+            case (uint8_t)'i':
+                ec_getDeviceInfo();
+                break;
+            case (uint8_t)'d':
+                ec_dumpEEPROM();
+                break;
+            case (uint8_t)'w':
+                ec_dumpRaw();
+                break;
+            case (uint8_t)'f':
+                ec_dumpFormatted();
+                break;
+            case (uint8_t)'r':
+                ec_reformatEEPROM();
+                break;
+            case (uint8_t)'t':
+                ec_logWithDelay();
+                break;
+            case (uint8_t)'h':
+                ec_displayHelp();
+                break;
+            default:
+                if (cmd < NUM_COMMANDS)
+                    (commands[cmd])();
+                else
+                    Serial.println("invalid command, send 'h' for help");
+        }
+    }
 }
 
 
