@@ -1,12 +1,12 @@
 /*
  * Rocket.ino
  * Code for sensor system to be incorporated into a model rocket to take
- * real world data during flight. Currently supports altimeter/temperature
- * sensor and EEPROM chip to store measurements. Will add support to take
- * measurements from accelerometer as well.
+ * real world data during flight. Currently supports EEPROM chip to store
+ * measurements. Will add support to take measurements from accelerometer
+ * as well.
  *
  * David Bonsall
- * Last update: 9/17/14
+ * Last update: 5/27/15
  * v1.0
 **/
 
@@ -19,34 +19,43 @@ extern "C"
 }
 #include <stdint.h>
 #include <stdio.h>
-
+#include "accelerometer.h"
 
 //general definitions
 #define EE_ADDR			0x50
+#define AXL_ADDR                0x30
 #define LED				13
 #define NUM_COMMANDS	10
 #define DEVICE_INFO		"RocketSenseV1"
 #define COUNTDOWN_SEC	120
+
+//Argument definitions to determine whether or not to send a stop condition when using MyTWI
+#define I2C_NO_STOP        0
+#define I2C_YES_STOP       1
 
 //command array
 typedef void (*ExternalCommand)(void);
 ExternalCommand commands[NUM_COMMANDS] = {&ec_beginLog, &ec_continueLog, &ec_endLog, &ec_dumpEEPROM, &ec_reformatEEPROM,
 					  &ec_dumpRaw, &ec_dumpFormatted, &ec_getDeviceInfo, &ec_logWithDelay, &ec_displayHelp};
 
+//globals
 boolean isLogging = false;	//current device state
 uint16_t  currentMemoryAddress = 0;	//current write address of the eeprom
-byte rawDumpPreamble[3] = {0x01, 0x02, 0x03};
-byte rawDumpEOT[3] = {0x03, 0x02, 0x01};
 
+//preamble and end of transmission signals for dump raw mode
+const byte rawDumpPreamble[3] = {0x01, 0x02, 0x03};
+const byte rawDumpEOT[3] = {0x03, 0x02, 0x01};
+
+//buffer to hold write address and data to write to eeprom chip to allow for 64 byte page writes at one time
 uint8_t eepromWriteBuffer[66];
 uint8_t currentBufferPos = 0;
-uint8_t lastWriteTime = 0;
 
 void setup()
 {
 	Serial.begin(115200);	//init Serial
 	pinMode(LED, OUTPUT);	//init Status LED
         
+        //print out startup info to the serial terminal
         Serial.println("Device Reset...");
         Serial.print(DEVICE_INFO);
         Serial.println(" send 'h' for help");
@@ -91,34 +100,79 @@ void loop()
                     Serial.println(eepromWriteBuffer[i], HEX);
                 isLogging = 0;*/
             }
-            delay(1);
+            delay(1);    //probably not neccesary for final, just to limit log speed
+            
+            //Loging info, heartbeat of sorts.....
             Serial.print("Logged at ");
             Serial.println(millis(), HEX);
         }
 }
 
+/**
+ ============================================================================================
+ =================================EEPROM COMMANDS============================================
+ ============================================================================================
+**/
+
 void eepromWrite(uint8_t* data, uint8_t quantity)    //TODO: check to make sure pointer is implemented correctly
 {
-    twi_writeTo(EE_ADDR, data, quantity, 1, 1);
+    twi_writeTo(EE_ADDR, data, quantity, 1, I2C_YES_STOP);
 }
 
 void eepromRead(uint8_t* rxBuffer, uint8_t quantity)    //TODO: check to make sure pointer is implemented correctly
 {
-    twi_readFrom(EE_ADDR, rxBuffer, quantity, 1);
+    twi_readFrom(EE_ADDR, rxBuffer, quantity, I2C_YES_STOP);
 }
+
+/**
+ ============================================================================================
+ ===============================AXCELEROMETER COMMANDS=======================================
+ ============================================================================================
+**/
+void axl_writeRegister(uint8_t regAddr, uint8_t data)
+{
+    uint8_t temp[2] = {regAddr, data};       //put the address and the data into a holder array
+    twi_writeTo(AXL_ADDR, temp, 2, 1, I2C_YES_STOP);    //write the data to the specified register
+}
+
+uint8_t axl_readRegister(uint8_t regAddr)
+{
+    uint8_t temp[1] = {regAddr};    //make an array to put the address into
+    twi_writeTo(AXL_ADDR, temp, 1, 1, I2C_NO_STOP);    //write the register number but do not stop
+    twi_readFrom(AXL_ADDR, temp, 1, I2C_YES_STOP);     //read the value into the temp array
+    return temp[0];    //return the value
+}
+
+void axl_readMultiple(uint8_t startRegAddr, uint8_t* data, uint8_t num)
+{
+    uint8_t temp[1] = {startRegAddr | INCREMENT_MASK};    //make an array to put the address into. also set address to auto increment with each byte read
+    twi_writeTo(AXL_ADDR, temp, 1, 1, I2C_NO_STOP);       //write the register address
+    twi_readFrom(AXL_ADDR, data, num, I2C_YES_STOP);      //read the data into the given buffer
+}
+
+void axl_get3DAxceleration(uint8_t startIndex, uint8_t* dataBuffer)
+{
+    //Read the 6 axcelleration bytes from the axcelerometer and put them into a data buffer at a given start index
+    //allows for direct read into the eeprom write buffer.
+    axl_readMultiple(OUT_X_L, &(dataBuffer[startIndex]), 6);
+}
+
+/**
+ ============================================================================================
+ ===============================EXTERNAL COMMANDS============================================
+ ============================================================================================
+**/
 
 void ec_beginLog()
 {
 	currentMemoryAddress = 0;	//reset memory address
         currentBufferPos = 0;           //reset the buffer position
-        lastWriteTime = (uint8_t)millis();    //reset the last write time to the current time
 	isLogging = true;			//start logging
 }
 
 void ec_continueLog()
 {
 	isLogging = true;	//start logging
-        lastWriteTime = (uint8_t)millis();    //reset the last write time to the current time
 }
 
 void ec_endLog()
