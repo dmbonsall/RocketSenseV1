@@ -28,6 +28,7 @@ extern "C"
 #define NUM_COMMANDS	10
 #define DEVICE_INFO		"RocketSenseV1"
 #define COUNTDOWN_SEC	120
+#define ACCEL_SCALE_FACTOR    (0.007185059f)    //24g / 2^15 * 9.81
 
 //Argument definitions to determine whether or not to send a stop condition when using MyTWI
 #define I2C_NO_STOP        0
@@ -54,6 +55,7 @@ void setup()
 {
 	Serial.begin(115200);	//init Serial
 	pinMode(LED, OUTPUT);	//init Status LED
+        axl_init();             //init the accelerometer
         
         //print out startup info to the serial terminal
         Serial.println("Device Reset...");
@@ -80,14 +82,18 @@ void loop()
             eepromWriteBuffer[currentBufferPos++] = (uint8_t)(time);
             
             //write 6 placeholder bytes
+            /*eepromWriteBuffer[currentBufferPos++] = 0xF0;
             eepromWriteBuffer[currentBufferPos++] = 0xF0;
             eepromWriteBuffer[currentBufferPos++] = 0xF0;
             eepromWriteBuffer[currentBufferPos++] = 0xF0;
             eepromWriteBuffer[currentBufferPos++] = 0xF0;
-            eepromWriteBuffer[currentBufferPos++] = 0xF0;
-            eepromWriteBuffer[currentBufferPos++] = 0xF0;
+            eepromWriteBuffer[currentBufferPos++] = 0xF0;*/
             
-            if ((currentBufferPos-2) % 64 == 0)    //when it is time to write to the eeprom
+            //write the acceration
+            axl_get3DAcceleration(currentBufferPos, eepromWriteBuffer);    //put the acceration data into the write buffer
+            currentBufferPos += 6;    //account for the 6 bytes of acceration data writen to the buffer
+            
+            if ((currentBufferPos-2) % 64 == 0)    //when it is time to write to the eeprom; -2 is to account for the 2 byte address for the eeprom write
             {
                 //write to memory
                 eepromWrite(eepromWriteBuffer, 66);    //write all of the data to eeprom
@@ -100,7 +106,7 @@ void loop()
                     Serial.println(eepromWriteBuffer[i], HEX);
                 isLogging = 0;*/
             }
-            delay(1);    //probably not neccesary for final, just to limit log speed
+            //delay(1);    //probably not neccesary for final, just to limit log speed
             
             //Loging info, heartbeat of sorts.....
             Serial.print("Logged at ");
@@ -150,11 +156,24 @@ void axl_readMultiple(uint8_t startRegAddr, uint8_t* data, uint8_t num)
     twi_readFrom(AXL_ADDR, data, num, I2C_YES_STOP);      //read the data into the given buffer
 }
 
-void axl_get3DAxceleration(uint8_t startIndex, uint8_t* dataBuffer)
+void axl_get3DAcceleration(uint8_t startIndex, uint8_t* dataBuffer)
 {
+    while ((axl_readRegister(STATUS_REG) & 0b00000111) != 0x03);    //wait for there to be nex available data for the x, y, and z registers
+    
+    //for debuging purposes, should probably be taken out for deployed version
+    if (axl_readRegister(STATUS_REG) & 0b01110000)    //check if any of the axis are averrun
+        Serial.println("Overrun Occured");
+        
     //Read the 6 axcelleration bytes from the axcelerometer and put them into a data buffer at a given start index
     //allows for direct read into the eeprom write buffer.
-    axl_readMultiple(OUT_X_L, &(dataBuffer[startIndex]), 6);
+    axl_readMultiple(OUT_X_L, &(dataBuffer[startIndex]), 6);    //still need to test
+}
+
+void axl_init()
+{
+    axl_writeRegister(CTRL_REG1, 0b00111111);    //Normal pwr Mode; 1kHz data rate; xyz eneable
+    //delay(1);    //dont think I need it
+    axl_writeRegister(CTRL_REG4, 0b10110000);    //block read, +-24g range
 }
 
 /**
@@ -294,29 +313,57 @@ void ec_logWithDelay()
 
 void ec_dumpFormatted()
 {
-    /*for (uint16_t j = 0; j < 4096; j++)	//read the entire chip (0x8000 bytes total / 8 bytes per read = 4096)
-	{
-		Wire.requestFrom(EE_ADDR, 8);	//get 8 bytes from the eeprom
-                if (!Wire.available()) break;    //in case no data was recieved
-                uint16_t time = (((uint8_t)Wire.read())<<8) | ((uint8_t)Wire.read());
+        Serial.println("Raw or float? 'r'/'f'");
+        while (!Serial.available());    //wait for there to be something sent
+        
+        uint8_t cmd = Serial.read();    //get the command
+        if (cmd != (uint8_t)'r' || cmd != (uint8_t)'f')    //make sure the command is valid
+        {
+            Serial.println("Invalid command");
+            return;
+        }
+        
+        
+        for (uint16_t i = 0; i < 4096; i++)    //read the entire chip (0x8000 bytes total / 8 bytes per read = 4096)
+        {
+            uint8_t temp[8];    //make a buffer for the read data
+            eepromRead(temp, 8);    //read 8 bytes (1 log entry)
+            uint16_t time = (temp[0]<<8) | (temp[1]);    //make the two byte time, MSB is in higher position; should probably change to little endian for sake of consistency
+            int16_t xRaw = (int16_t)((temp[2]) | (temp[3]<<8));    //make the two byte x acceration
+            int16_t yRaw = (int16_t)(temp[4]) | (temp[5]<<8);    //make the two byte x acceration
+            int16_t zRaw = (int16_t)(temp[6]) | (temp[7]<<8);    //make the two byte x acceration
+            
+            if (cmd == 'f')    //if we need to print it out in float format
+            {
+                //scale the raw to a float value in meters/second/second
+                float xAccel = xRaw * ACCEL_SCALE_FACTOR;
+                float yAccel = yRaw * ACCEL_SCALE_FACTOR;
+                float zAccel = zRaw * ACCEL_SCALE_FACTOR;
+                
+                //print out the data comma seperated
                 Serial.print(time, DEC);
                 Serial.print(",");
-                Serial.print((uint8_t)(Wire.read()), DEC);
+                Serial.print(xAccel, DEC);
                 Serial.print(",");
-                Serial.print((uint8_t)(Wire.read()), DEC);
+                Serial.print(yAccel, DEC);
                 Serial.print(",");
-                Serial.print((uint8_t)(Wire.read()), DEC);
-                Serial.print(",");
-                Serial.print((uint8_t)(Wire.read()), DEC);
-                Serial.print(",");
-                Serial.print((uint8_t)(Wire.read()), DEC);
-                Serial.print(",");
-                Serial.print((uint8_t)(Wire.read()), DEC);
-                Serial.print(",");
-                Serial.print((uint8_t)(Wire.read()), DEC);
+                Serial.print(zAccel, DEC);
                 Serial.println();
-	}*/
-        Serial.println("Laziness prevented this from being implemented... check again later");
+            }
+            else    //if we need to print it out in raw format
+            {
+                //print out the data comma seperated
+                Serial.print(time, DEC);
+                Serial.print(",");
+                Serial.print(xRaw, DEC);
+                Serial.print(",");
+                Serial.print(yRaw, DEC);
+                Serial.print(",");
+                Serial.print(zRaw, DEC);
+                Serial.println();
+            }
+        }
+        Serial.println("End transmission");
 }
 
 void ec_displayHelp()
