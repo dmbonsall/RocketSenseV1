@@ -23,7 +23,7 @@ extern "C"
 
 //general definitions
 #define EE_ADDR			0x50
-#define AXL_ADDR                0x30
+#define AXL_ADDR                0x19
 #define LED				13
 #define NUM_COMMANDS	10
 #define DEVICE_INFO		"RocketSenseV1"
